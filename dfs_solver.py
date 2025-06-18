@@ -1,5 +1,6 @@
 import time
 import tracemalloc
+import multiprocessing
 from n_queen_board import NQueenBoard
 
 def is_safe(board, row, col, n):
@@ -39,11 +40,7 @@ def dfs_util(board_obj, row, move_counter):
 
     return False
 
-def solve_n_queens_dfs(n):
-    """
-    Solves the N-Queens problem using Depth-First Search.
-    Returns a dictionary with benchmark metrics.
-    """
+def dfs_worker(n, result_dict):
     board = NQueenBoard(n)
     board.reset_board()
     move_counter = [0]
@@ -57,7 +54,7 @@ def solve_n_queens_dfs(n):
     current, peak = tracemalloc.get_traced_memory()
     tracemalloc.stop()
 
-    return {
+    result_dict.update({
         "algorithm": "DFS",
         "n": n,
         "time": end_time - start_time,
@@ -66,11 +63,41 @@ def solve_n_queens_dfs(n):
         "conflicts": 0 if success else board.calculate_conflicts(),
         "moves": move_counter[0],
         "board": board if success else None
-    }
+    })
+
+def solve_n_queens_dfs(n, timeout_sec=300):
+    """
+    Solves the N-Queens problem using DFS with a timeout to prevent infinite execution.
+    """
+    manager = multiprocessing.Manager()
+    result_dict = manager.dict()
+
+    p = multiprocessing.Process(target=dfs_worker, args=(n, result_dict))
+    p.start()
+    p.join(timeout=timeout_sec)
+
+    if p.is_alive():
+        p.terminate()
+        p.join()
+        return {
+            "algorithm": "DFS",
+            "n": n,
+            "time": timeout_sec,
+            "memory_mb": None,
+            "success": False,
+            "conflicts": None,
+            "moves": None,
+            "board": None,
+            "timeout": True
+        }
+
+    result_dict = dict(result_dict)
+    result_dict["timeout"] = False
+    return result_dict
 
 # Example test
 if __name__ == "__main__":
     result = solve_n_queens_dfs(30)
     print(f"Success: {result['success']}, Time: {result['time']:.4f}s, Moves: {result['moves']}, Memory: {result['memory_mb']:.2f}MB")
-    if result["success"]:
+    if result["success"] and result["board"]:
         result["board"].print_board()

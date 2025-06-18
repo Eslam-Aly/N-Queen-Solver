@@ -1,67 +1,74 @@
 import random
 import time
 import tracemalloc
+from multiprocessing import Process, Queue
 from n_queen_board import NQueenBoard
 
 def create_individual(n):
     """
-    An individual is a list of column positions (1 queen per row).
+    An individual is a permutation of [0..n-1] representing column positions.
+    Each value at index `i` means the queen in row `i` is placed in that column.
+    This avoids row and column conflicts by design.
     """
-    return [random.randint(0, n - 1) for _ in range(n)]
+    return random.sample(range(n), n)
+
+def count_conflicts(individual):
+    """
+    Count diagonal conflicts in an individual.
+    """
+    n = len(individual)
+    conflicts = 0
+    for i in range(n):
+        for j in range(i + 1, n):
+            if abs(i - j) == abs(individual[i] - individual[j]):
+                conflicts += 1
+    return conflicts
 
 def fitness(individual):
     """
-    Return the number of non-conflicting pairs divided by total pairs.
+    Fitness is inverse of the number of diagonal conflicts.
     """
-    n = len(individual)
-    total_pairs = n * (n - 1) // 2
-    non_conflicts = 0
-
-    for i in range(n):
-        for j in range(i + 1, n):
-            if individual[i] != individual[j] and abs(i - j) != abs(individual[i] - individual[j]):
-                non_conflicts += 1
-
-    return non_conflicts / total_pairs  # Normalized
+    return 1 / (1 + count_conflicts(individual))
 
 def is_solution(individual):
-    return fitness(individual) == 1.0
+    return count_conflicts(individual) == 0
 
 def individual_to_board(individual):
     n = len(individual)
     board = NQueenBoard(n)
     board.reset_board()
-    for row in range(n):
-        col = individual[row]
+    for row, col in enumerate(individual):
         board.board[row][col] = 1
         board.queen_positions.append((row, col))
     return board
 
-def crossover(p1, p2):
-    n = len(p1)
-    point = random.randint(1, n - 2)
-    return p1[:point] + p2[point:]
+def crossover(parent1, parent2):
+    n = len(parent1)
+    start, end = sorted(random.sample(range(n), 2))
+    child = [None] * n
+    child[start:end] = parent1[start:end]
+    fill = [x for x in parent2 if x not in child[start:end]]
+    idx = 0
+    for i in range(n):
+        if child[i] is None:
+            child[i] = fill[idx]
+            idx += 1
+    return child
 
 def mutate(individual, mutation_rate):
     n = len(individual)
     for i in range(n):
         if random.random() < mutation_rate:
-            individual[i] = random.randint(0, n - 1)
+            j = random.randint(0, n - 1)
+            individual[i], individual[j] = individual[j], individual[i]
 
-def solve_n_queens_genetic(n, seed=None,
-                           population_size=100,
-                           generations=1000,
-                           mutation_rate=0.02,
-                           selection_size=20):
-    """
-    Solve N-Queens using Genetic Algorithm.
-    Returns a dictionary with benchmarking metrics.
-    """
+def genetic_algorithm_worker(n, seed, queue, population_size=100, generations=1000,
+                              mutation_rate=0.1, elitism_k=5):
     if seed is not None:
         random.seed(seed)
 
     population = [create_individual(n) for _ in range(population_size)]
-    move_count = 0  # Each generation counts as a "move"
+    move_count = 0
 
     tracemalloc.start()
     start_time = time.perf_counter()
@@ -75,12 +82,11 @@ def solve_n_queens_genetic(n, seed=None,
             success = True
             break
 
-        next_gen = population[:selection_size]  # Elitism
+        next_gen = population[:elitism_k]
 
         while len(next_gen) < population_size:
-            parent1 = random.choice(population[:selection_size])
-            parent2 = random.choice(population[:selection_size])
-            child = crossover(parent1, parent2)
+            p1, p2 = random.choices(population[:50], k=2)
+            child = crossover(p1, p2)
             mutate(child, mutation_rate)
             next_gen.append(child)
 
@@ -94,7 +100,7 @@ def solve_n_queens_genetic(n, seed=None,
     current, peak = tracemalloc.get_traced_memory()
     tracemalloc.stop()
 
-    return {
+    queue.put({
         "algorithm": "GeneticAlgorithm",
         "n": n,
         "time": end_time - start_time,
@@ -103,9 +109,31 @@ def solve_n_queens_genetic(n, seed=None,
         "conflicts": 0 if success else board.calculate_conflicts(),
         "moves": move_count,
         "board": board if success else None
-    }
+    })
 
-# Example test
+def solve_n_queens_genetic(n, seed=None, timeout_seconds=30):
+    queue = Queue()
+    process = Process(target=genetic_algorithm_worker, args=(n, seed, queue))
+    process.start()
+    process.join(timeout_seconds)
+
+    if process.is_alive():
+        process.terminate()
+        process.join()
+        return {
+            "algorithm": "GeneticAlgorithm",
+            "n": n,
+            "time": timeout_seconds,
+            "memory_mb": 0,
+            "success": False,
+            "conflicts": -1,
+            "moves": 0,
+            "board": None
+        }
+
+    return queue.get()
+
+# Example usage
 if __name__ == "__main__":
     result = solve_n_queens_genetic(30, seed=42)
     print(f"Success: {result['success']}, Time: {result['time']:.4f}s, Moves: {result['moves']}, Memory: {result['memory_mb']:.2f}MB")

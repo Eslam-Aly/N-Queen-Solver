@@ -5,19 +5,16 @@ import multiprocessing
 from n_queen_board import NQueenBoard
 
 def calculate_conflicts(board_obj):
-    """
-    Count the number of conflicting pairs of queens.
-    """
     return board_obj.calculate_conflicts()
 
-def get_best_move(board_obj):
+def get_best_move_with_sideways(board_obj, allow_sideways=True):
     """
-    Try moving each queen in its row to a different column to find the best move.
-    Returns (row, new_col, new_conflicts), or None if no better move found.
+    Tries all possible queen moves and picks the best one (including sideways if allowed).
+    Returns (row, new_col, new_conflicts) or None if stuck.
     """
     n = board_obj.n
     current_conflicts = calculate_conflicts(board_obj)
-    best_move = None
+    best_moves = []
     best_conflicts = current_conflicts
 
     for row in range(n):
@@ -27,7 +24,6 @@ def get_best_move(board_obj):
             if new_col == current_col:
                 continue
 
-            # Try move
             board_obj.board[row][current_col] = 0
             board_obj.board[row][new_col] = 1
             board_obj.queen_positions[row] = (row, new_col)
@@ -36,51 +32,60 @@ def get_best_move(board_obj):
 
             if new_conflicts < best_conflicts:
                 best_conflicts = new_conflicts
-                best_move = (row, new_col)
+                best_moves = [(row, new_col)]
+            elif allow_sideways and new_conflicts == best_conflicts:
+                best_moves.append((row, new_col))
 
-            # Undo move
             board_obj.board[row][new_col] = 0
             board_obj.board[row][current_col] = 1
             board_obj.queen_positions[row] = (row, current_col)
 
-    return best_move, best_conflicts
+    if best_moves:
+        return random.choice(best_moves), best_conflicts
+    else:
+        return None, current_conflicts
 
-def hill_climbing_worker(n, seed, max_steps, result_dict):
+def restart_hill_climbing_worker(n, seed, max_steps, max_restarts, allow_sideways, result_dict):
     if seed is not None:
         random.seed(seed)
 
-    board = NQueenBoard(n, seed)
     move_count = 0
-
     tracemalloc.start()
     start_time = time.perf_counter()
 
     success = False
-    for step in range(max_steps):
-        current_conflicts = calculate_conflicts(board)
-        if current_conflicts == 0:
-            success = True
+    board = None
+
+    for restart in range(max_restarts):
+        board = NQueenBoard(n, seed + restart if seed is not None else None)
+
+        for step in range(max_steps):
+            current_conflicts = calculate_conflicts(board)
+            if current_conflicts == 0:
+                success = True
+                break
+
+            move, new_conflicts = get_best_move_with_sideways(board, allow_sideways=allow_sideways)
+            move_count += 1
+
+            if move is None or new_conflicts >= current_conflicts:
+                break  # Local minimum
+
+            row, new_col = move
+            old_col = board.queen_positions[row][1]
+            board.board[row][old_col] = 0
+            board.board[row][new_col] = 1
+            board.queen_positions[row] = (row, new_col)
+
+        if success:
             break
-
-        move, new_conflicts = get_best_move(board)
-        move_count += 1
-
-        if move is None or new_conflicts >= current_conflicts:
-            break
-
-        # Apply best move
-        row, new_col = move
-        old_col = board.queen_positions[row][1]
-        board.board[row][old_col] = 0
-        board.board[row][new_col] = 1
-        board.queen_positions[row] = (row, new_col)
 
     end_time = time.perf_counter()
     current, peak = tracemalloc.get_traced_memory()
     tracemalloc.stop()
 
     result_dict.update({
-        "algorithm": "HillClimbing",
+        "algorithm": "HillClimbing_Restarts",
         "n": n,
         "time": end_time - start_time,
         "memory_mb": peak / (1024 * 1024),
@@ -90,14 +95,16 @@ def hill_climbing_worker(n, seed, max_steps, result_dict):
         "board": board if success else None
     })
 
-def solve_n_queens_hill_climbing(n, seed=None, max_steps=1000, timeout_sec=10):
+def solve_n_queens_restart_hill_climbing(n, seed=None, max_steps=1000, max_restarts=50, allow_sideways=True, timeout_sec=15):
     """
-    Solve N-Queens using Hill Climbing (baseline version, no restarts).
-    Returns a dictionary with benchmarking metrics.
+    Optimized Hill Climbing with Random Restarts and optional Sideways Moves.
     """
     manager = multiprocessing.Manager()
     result_dict = manager.dict()
-    process = multiprocessing.Process(target=hill_climbing_worker, args=(n, seed, max_steps, result_dict))
+    process = multiprocessing.Process(
+        target=restart_hill_climbing_worker,
+        args=(n, seed, max_steps, max_restarts, allow_sideways, result_dict)
+    )
 
     process.start()
     process.join(timeout=timeout_sec)
@@ -106,7 +113,7 @@ def solve_n_queens_hill_climbing(n, seed=None, max_steps=1000, timeout_sec=10):
         process.terminate()
         process.join()
         return {
-            "algorithm": "HillClimbing",
+            "algorithm": "HillClimbing_Restarts",
             "n": n,
             "time": timeout_sec,
             "memory_mb": None,
@@ -123,7 +130,7 @@ def solve_n_queens_hill_climbing(n, seed=None, max_steps=1000, timeout_sec=10):
 
 # Example test
 if __name__ == "__main__":
-    result = solve_n_queens_hill_climbing(30, seed=42)
+    result = solve_n_queens_restart_hill_climbing(30, seed=42)
     print(f"Success: {result['success']}, Time: {result['time']:.4f}s, Moves: {result['moves']}, Memory: {result['memory_mb']:.2f}MB")
     if result["success"] and result["board"]:
         result["board"].print_board()

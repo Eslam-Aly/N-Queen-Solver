@@ -1,103 +1,78 @@
 import time
 import tracemalloc
-import multiprocessing
-from n_queen_board import NQueenBoard
+from board import NQueenBoard
 
-def is_safe(board, row, col, n):
-    """
-    Check if placing a queen at (row, col) is safe.
-    """
-    for i in range(row):
-        if board[i][col] == 1:
-            return False
-        if col - (row - i) >= 0 and board[i][col - (row - i)] == 1:
-            return False
-        if col + (row - i) < n and board[i][col + (row - i)] == 1:
+def is_safe(row, col, queens):
+    for qr, qc in queens:
+        if qc == col or abs(row - qr) == abs(col - qc):
             return False
     return True
 
-def dfs_util(board_obj, row, move_counter):
+def solve_n_queens_dfs(n, seed=None, timeout=600):
     """
-    Recursive utility to place queens row by row.
-    Each valid attempt to place a queen counts as a move.
+    Solves the N-Queens problem using pure DFS with backtracking.
+    No randomization, fair for benchmarking.
     """
-    if row == board_obj.n:
-        return True
-
-    for col in range(board_obj.n):
-        move_counter[0] += 1  # Count each placement attempt
-
-        if is_safe(board_obj.board, row, col, board_obj.n):
-            board_obj.board[row][col] = 1
-            board_obj.queen_positions.append((row, col))
-
-            if dfs_util(board_obj, row + 1, move_counter):
-                return True
-
-            # Backtrack
-            board_obj.board[row][col] = 0
-            board_obj.queen_positions.pop()
-
-    return False
-
-def dfs_worker(n, result_dict):
+    if seed is not None:
+        import random
+        random.seed(seed)
     board = NQueenBoard(n)
     board.reset_board()
-    move_counter = [0]
 
-    tracemalloc.start()
+    solution = []
+    move_count = 0
+    timed_out = False
     start_time = time.perf_counter()
+    tracemalloc.start()
 
-    success = dfs_util(board, 0, move_counter)
+    def dfs(row, queens):
+        nonlocal solution, move_count, timed_out
+
+        # Timeout check
+        if time.perf_counter() - start_time > timeout:
+            timed_out = True
+            return
+
+        if row == n:
+            solution.extend(queens)  # Copy final solution
+            return
+
+        for col in range(n):  # No shuffle — deterministic DFS
+            if is_safe(row, col, queens):
+                move_count += 1
+                queens.append((row, col))
+                dfs(row + 1, queens)
+                if solution:
+                    return
+                queens.pop()
+
+    dfs(0, [])
 
     end_time = time.perf_counter()
     current, peak = tracemalloc.get_traced_memory()
     tracemalloc.stop()
 
-    result_dict.update({
+    if solution:
+        for row, col in solution:
+            board.place_queen(row, col)
+
+    return {
         "algorithm": "DFS",
         "n": n,
-        "time": end_time - start_time,
-        "memory_mb": peak / (1024 * 1024),
-        "success": success,
-        "conflicts": 0 if success else board.calculate_conflicts(),
-        "moves": move_counter[0],
-        "board": board if success else None
-    })
-
-def solve_n_queens_dfs(n, timeout_sec=300):
-    """
-    Solves the N-Queens problem using DFS with a timeout to prevent infinite execution.
-    """
-    manager = multiprocessing.Manager()
-    result_dict = manager.dict()
-
-    p = multiprocessing.Process(target=dfs_worker, args=(n, result_dict))
-    p.start()
-    p.join(timeout=timeout_sec)
-
-    if p.is_alive():
-        p.terminate()
-        p.join()
-        return {
-            "algorithm": "DFS",
-            "n": n,
-            "time": timeout_sec,
-            "memory_mb": None,
-            "success": False,
-            "conflicts": None,
-            "moves": None,
-            "board": None,
-            "timeout": True
-        }
-
-    result_dict = dict(result_dict)
-    result_dict["timeout"] = False
-    return result_dict
+        "success": bool(solution),
+        "timeout": timed_out,
+        "time": round(end_time - start_time, 4),
+        "moves": move_count,
+        "memory_mb": round(peak / (1024 * 1024), 4),
+        "conflicts": board.calculate_conflicts() if solution else "N/A",
+        "board": board if solution else None
+    }
 
 # Example test
 if __name__ == "__main__":
-    result = solve_n_queens_dfs(30)
-    print(f"Success: {result['success']}, Time: {result['time']:.4f}s, Moves: {result['moves']}, Memory: {result['memory_mb']:.2f}MB")
-    if result["success"] and result["board"]:
+    n = 10
+    result = solve_n_queens_dfs(n, timeout=1200)
+    print(f"N = {result['n']}, Success: {result['success']}, Timeout: {result['timeout']}, "
+          f"Time: {result['time']}s, Moves: {result['moves']}, Memory: {result['memory_mb']}MB")
+    if result["success"]:
         result["board"].print_board()

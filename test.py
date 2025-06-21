@@ -3,107 +3,78 @@ import time
 
 from dfs_solver import solve_n_queens_dfs
 from hill_climbing_solver import solve_n_queens_hill_climbing
-from restart_hill_climbing_solver import solve_n_queens_restart_hill_climbing
 from sim_annealing_solver import solve_n_queens_simulated_annealing
 from genetic_solver import solve_n_queens_genetic
 
-# Define solvers
-ALGORITHMS = [
-    ("DFS", solve_n_queens_dfs),
-    ("HillClimbing", solve_n_queens_hill_climbing),
-    ("RestartHillClimbing", solve_n_queens_restart_hill_climbing),
-    ("SimulatedAnnealing", solve_n_queens_simulated_annealing),
-    ("GeneticAlgorithm", solve_n_queens_genetic),
+def run_tests():
+    solvers = [
+        solve_n_queens_hill_climbing,
+        solve_n_queens_simulated_annealing,
+        solve_n_queens_genetic,
+        solve_n_queens_dfs
+    ]
+
+    n_values = [10, 30, 50, 100, 200]
+    num_runs_per_n = 1  # Increase for better benchmark
+    output_file = "n_queens_benchmark_results.csv"
+
+    headers = [
+        "Algorithm", "N", "Run", "Success", "Timeout", "Time(s)",
+        "Moves", "Memory(MB)", "Conflicts",
+        "Restarts", "MaxRestartsHit",
+        "Generations", "MaxGenerationsHit"
 ]
 
-N_SIZES = [10, 30, 50, 100, 200]
-SEED = 42
-TIMEOUT_LIMIT = 60  # seconds
-CSV_FILE = "benchmark_results.csv"
+    total = len(solvers) * len(n_values) * num_runs_per_n
+    current = 1
 
-TOTAL_TASKS = sum(
-    1 for n in N_SIZES for name, _ in ALGORITHMS
-    if not (name == "DFS" and n > 50) and not (name == "GeneticAlgorithm" and n > 100)
-)
-completed_tasks = 0
-
-def safe_run(solver_func, n, seed):
-    """
-    Run solver function with timeout and return result or fallback if it fails.
-    """
-    try:
-        if "dfs" in solver_func.__name__:
-            return solver_func(n=n, timeout_sec=TIMEOUT_LIMIT)
-        else:
-            return solver_func(n=n, seed=seed)
-    except Exception as e:
-        return {
-            "algorithm": solver_func.__name__,
-            "n": n,
-            "time": None,
-            "memory_mb": None,
-            "success": False,
-            "conflicts": None,
-            "moves": None,
-            "board": None,
-            "timeout": True,
-            "error": str(e)
-        }
-
-def print_progress_bar(current, total, length=40):
-    """
-    Prints a simple text progress bar.
-    """
-    percent = int(100 * current / total)
-    filled_len = int(length * current // total)
-    bar = "=" * filled_len + "-" * (length - filled_len)
-    print(f"\rProgress: [{bar}] {percent}% ({current}/{total})", end="")
-
-def run_benchmark():
-    global completed_tasks
-    results = []
-
-    print("Starting benchmark...\n")
-    for n in N_SIZES:
-        for name, solver in ALGORITHMS:
-            if name == "DFS" and n > 50:
-                completed_tasks += 1
-                print_progress_bar(completed_tasks, TOTAL_TASKS)
-                continue
-            if name == "GeneticAlgorithm" and n > 100:
-                completed_tasks += 1
-                print_progress_bar(completed_tasks, TOTAL_TASKS)
-                continue
-
-            print(f"\nRunning {name} for N={n}...")
-            result = safe_run(solver, n, SEED)
-
-            results.append({
-                "algorithm": result.get("algorithm", name),
-                "n": result["n"],
-                "success": result["success"],
-                "time": result["time"],
-                "memory_mb": result["memory_mb"],
-                "moves": result["moves"],
-                "conflicts": result["conflicts"],
-                "timeout": result.get("timeout", False),
-                "error": result.get("error", "")
-            })
-
-            completed_tasks += 1
-            print_progress_bar(completed_tasks, TOTAL_TASKS)
-
-    print("\n\nWriting results to CSV...")
-
-    with open(CSV_FILE, mode="w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=[
-            "algorithm", "n", "success", "time", "memory_mb",
-            "moves", "conflicts", "timeout", "error"
-        ])
+    with open(output_file, mode="w", newline="") as csvfile:
+        writer = csv.DictWriter(csvfile, fieldnames=headers)
         writer.writeheader()
-        writer.writerows(results)
 
-    print(f"\n✅ Benchmark completed and saved to {CSV_FILE}")
+        for solver in solvers:
+            for n in n_values:
+                for run in range(1, num_runs_per_n + 1):
+                    print(f"[{current}/{total}] Running {solver.__name__} | N = {n} | Run = {run}")
+                    current += 1
+
+                    try:
+                        seed = int(time.time() * 1000) % 1_000_000
+                        result = solver(n=n, seed=seed)
+
+                        writer.writerow({
+                            "Algorithm": result["algorithm"],
+                            "N": result["n"],
+                            "Run": run,
+                            "Success": result["success"],
+                            "Timeout": result.get("timeout", False),
+                            "Time(s)": round(result["time"], 4),
+                            "Moves": result["moves"],
+                            "Memory(MB)": round(result["memory_mb"], 2),
+                            "Conflicts": result["conflicts"],
+                            "Restarts": result.get("restarts", ""),
+                            "MaxRestartsHit": result.get("max_restarts_reached", ""),
+                            "Generations": result.get("generations", ""),
+                            "MaxGenerationsHit": result.get("max_generations_reached", "")
+                        })
+
+                    except Exception as e:
+                        print(f"Error in {solver.__name__} for N = {n}, Run = {run}: {e}")
+                        writer.writerow({
+                            "Algorithm": solver.__name__,
+                            "N": n,
+                            "Run": run,
+                            "Success": False,
+                            "Timeout": "Error",
+                            "Time(s)": "Error",
+                            "Moves": "Error",
+                            "Memory(MB)": "Error",
+                            "Conflicts": "Error",
+                            "Restarts": "Error",
+                            "MaxRestartsHit": "Error"
+                        })
+
+    print("\nAll tests completed. Results saved to 'n_queens_benchmark_results.csv'")
 
 if __name__ == "__main__":
-    run_benchmark()
+    run_tests()

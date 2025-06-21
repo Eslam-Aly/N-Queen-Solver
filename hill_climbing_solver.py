@@ -1,129 +1,116 @@
 import random
 import time
 import tracemalloc
-import multiprocessing
-from n_queen_board import NQueenBoard
+from board import NQueenBoard
 
-def calculate_conflicts(board_obj):
-    """
-    Count the number of conflicting pairs of queens.
-    """
-    return board_obj.calculate_conflicts()
+def count_conflicts(queen_cols):
+    conflicts = 0
+    n = len(queen_cols)
+    for i in range(n):
+        for j in range(i + 1, n):
+            if abs(i - j) == abs(queen_cols[i] - queen_cols[j]):
+                conflicts += 1
+    return conflicts
 
-def get_best_move(board_obj):
-    """
-    Try moving each queen in its row to a different column to find the best move.
-    Returns (row, new_col, new_conflicts), or None if no better move found.
-    """
-    n = board_obj.n
-    current_conflicts = calculate_conflicts(board_obj)
-    best_move = None
+def get_best_swap(queen_cols):
+    n = len(queen_cols)
+    current_conflicts = count_conflicts(queen_cols)
     best_conflicts = current_conflicts
+    best_swap = None
 
-    for row in range(n):
-        current_col = board_obj.queen_positions[row][1]
-
-        for new_col in range(n):
-            if new_col == current_col:
-                continue
-
-            # Try move
-            board_obj.board[row][current_col] = 0
-            board_obj.board[row][new_col] = 1
-            board_obj.queen_positions[row] = (row, new_col)
-
-            new_conflicts = calculate_conflicts(board_obj)
+    for i in range(n):
+        for j in range(i + 1, n):
+            queen_cols[i], queen_cols[j] = queen_cols[j], queen_cols[i]
+            new_conflicts = count_conflicts(queen_cols)
+            queen_cols[i], queen_cols[j] = queen_cols[j], queen_cols[i]
 
             if new_conflicts < best_conflicts:
                 best_conflicts = new_conflicts
-                best_move = (row, new_col)
+                best_swap = (i, j)
 
-            # Undo move
-            board_obj.board[row][new_col] = 0
-            board_obj.board[row][current_col] = 1
-            board_obj.queen_positions[row] = (row, current_col)
+    return best_swap, best_conflicts
 
-    return best_move, best_conflicts
-
-def hill_climbing_worker(n, seed, max_steps, result_dict):
+def solve_n_queens_hill_climbing(n, seed=None, max_restarts=100, max_sideways=100):
     if seed is not None:
         random.seed(seed)
 
-    board = NQueenBoard(n, seed)
-    move_count = 0
+    move_count_total = 0
+    restart_count = 0
+    success = False
+    best_board = None
 
     tracemalloc.start()
     start_time = time.perf_counter()
 
-    success = False
-    for step in range(max_steps):
-        current_conflicts = calculate_conflicts(board)
-        if current_conflicts == 0:
-            success = True
+    while restart_count < max_restarts:
+        # Start with a random valid permutation
+        queen_cols = random.sample(range(n), n)
+        move_count = 0
+        sideways_moves = 0
+
+        while True:
+            conflicts = count_conflicts(queen_cols)
+            if conflicts == 0:
+                success = True
+                break
+
+            swap, new_conflicts = get_best_swap(queen_cols)
+
+            if not swap:
+                break  # Local minimum, no better swap found
+
+            if new_conflicts < conflicts:
+                sideways_moves = 0
+            elif new_conflicts == conflicts:
+                sideways_moves += 1
+                if sideways_moves > max_sideways:
+                    break
+            else:
+                break
+
+            i, j = swap
+            queen_cols[i], queen_cols[j] = queen_cols[j], queen_cols[i]
+            move_count += 1
+
+        move_count_total += move_count
+
+        if success:
+            # Build board for printing/visualization
+            board = NQueenBoard(n)
+            board.reset_board()
+            for row, col in enumerate(queen_cols):
+                board.board[row][col] = 1
+                board.queen_positions.append((row, col))
+            best_board = board
             break
 
-        move, new_conflicts = get_best_move(board)
-        move_count += 1
-
-        if move is None or new_conflicts >= current_conflicts:
-            break
-
-        # Apply best move
-        row, new_col = move
-        old_col = board.queen_positions[row][1]
-        board.board[row][old_col] = 0
-        board.board[row][new_col] = 1
-        board.queen_positions[row] = (row, new_col)
+        restart_count += 1
 
     end_time = time.perf_counter()
     current, peak = tracemalloc.get_traced_memory()
     tracemalloc.stop()
 
-    result_dict.update({
-        "algorithm": "HillClimbing",
+    return {
+        "algorithm": "HillClimbing+Swaps",
         "n": n,
-        "time": end_time - start_time,
-        "memory_mb": peak / (1024 * 1024),
+        "time": round(end_time - start_time, 4),
+        "memory_mb": round(peak / (1024 * 1024), 4),
         "success": success,
-        "conflicts": 0 if success else calculate_conflicts(board),
-        "moves": move_count,
-        "board": board if success else None
-    })
+        "conflicts": 0 if success else count_conflicts(queen_cols),
+        "moves": move_count_total,
+        "restarts": restart_count,
+        "max_restarts_reached": not success,
+        "board": best_board
+    }
 
-def solve_n_queens_hill_climbing(n, seed=None, max_steps=1000, timeout_sec=10):
-    """
-    Solve N-Queens using Hill Climbing (baseline version, no restarts).
-    Returns a dictionary with benchmarking metrics.
-    """
-    manager = multiprocessing.Manager()
-    result_dict = manager.dict()
-    process = multiprocessing.Process(target=hill_climbing_worker, args=(n, seed, max_steps, result_dict))
-
-    process.start()
-    process.join(timeout=timeout_sec)
-
-    if process.is_alive():
-        process.terminate()
-        process.join()
-        return {
-            "algorithm": "HillClimbing",
-            "n": n,
-            "time": timeout_sec,
-            "memory_mb": None,
-            "success": False,
-            "conflicts": None,
-            "moves": None,
-            "board": None,
-            "timeout": True
-        }
-
-    result_dict = dict(result_dict)
-    result_dict["timeout"] = False
-    return result_dict
-
-# Example test
+# Example run
 if __name__ == "__main__":
-    result = solve_n_queens_hill_climbing(30, seed=42)
-    print(f"Success: {result['success']}, Time: {result['time']:.4f}s, Moves: {result['moves']}, Memory: {result['memory_mb']:.2f}MB")
-    if result["success"] and result["board"]:
+    n = 10
+    print(f"Solving N = {n}")
+    result = solve_n_queens_hill_climbing(n)
+    print(f"N = {result['n']}, Success: {result['success']}, Time: {result['time']}s, "
+          f"Moves: {result['moves']}, Restarts: {result['restarts']}, "
+          f"Memory: {result['memory_mb']:.2f}MB")
+
+    if result["success"]:
         result["board"].print_board()

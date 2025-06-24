@@ -37,3 +37,36 @@ The goal is to place N queens on an N×N chessboard such that no two queens atta
 ├── n_queens_benchmark_results   # CSV file with performance logs
 └── README.md                    # Project description (this file)
 </code></pre>
+
+## 🧪 Benchmarking Method
+
+Each solver is evaluated on randomized board configurations per N value to ensure reliable and reproducible results.  
+Initial states are uniformly generated across algorithms to maintain fairness.
+
+**Metrics Recorded:**
+- Total Solve Time  
+- Peak Memory Usage  
+- Success/Failure Rate  
+- Number of Queen Moves  
+- Final Conflict Count (if unsolved)
+
+Results are stored in `n_queens_benchmark_results.csv` for further analysis and visualization.
+
+---
+
+## 📝 License
+
+This project is released under the **Apache-2.0 License**.
+
+---
+
+## 🤝 Contributing
+
+Suggestions, improvements, and pull requests are welcome.  
+Please open an issue to discuss any major changes before submitting a PR.
+
+---
+
+## 👤 Author
+
+Built by [Eslam Aly](https://github.com/Eslam-Aly)

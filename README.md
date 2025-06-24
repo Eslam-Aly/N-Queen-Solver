@@ -26,7 +26,7 @@ The goal is to place N queens on an N×N chessboard such that no two queens atta
 
 ## 📁 Project Structure
 
-<pre><code>```text
+<pre><code>
 ├── board.py                     # Generates board and tracks queen conflicts
 ├── dfs_solver.py                # DFS implementation
 ├── hill_climbing.py             # Hill Climbing with restarts
@@ -36,5 +36,4 @@ The goal is to place N queens on an N×N chessboard such that no two queens atta
 ├── main.py                      # Test the board setup visually
 ├── n_queens_benchmark_results   # CSV file with performance logs
 └── README.md                    # Project description (this file)
-```
 </code></pre>
